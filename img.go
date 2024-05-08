@@ -5,19 +5,21 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
+	"fmt"
 	"image"
 	"image/png"
+	"io/ioutil"
 	"os"
 
 	"github.com/auyer/steganography"
 )
 
 func main() {
-	// Define secret messages and user-provided encryption keys
-	secretMessages := []string{"my secret message 1", "another secret message"}
+	// Define the secret message and user-provided encryption keys
+	secretMessages := []string{"decoyee secret message", "my actual Secret message"}
 	userKeys := []string{"mySecret1", "mySecret2"}
 
-	// Convert user-provided keys to 32-byte keys using SHA-256 and encrypt messages
+	// Convert the user-provided keys to 32-byte keys using SHA-256
 	encryptedMessages := [][]byte{}
 	for i, key := range userKeys {
 		encryptionKey := generateAESKey(key)
@@ -29,9 +31,9 @@ func main() {
 	}
 
 	// Load an image to hide the encrypted messages
-	sourceImage, err := loadImageFromFile("./lena.png")
+	sourceImage, err := loadImageFromFile("/Users/shyampatel/Networking/random/den-cryption/lena.png")
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("Failed to load image: %v", err))
 	}
 
 	// Embed all encrypted messages into the image
@@ -47,13 +49,20 @@ func main() {
 	}
 
 	// Decrypt the second message as an example
-	decryptionKey := generateAESKey(userKeys[1]) // Using the second key
-	decryptedMessage, err := decryptAES(extractedMessages[1], decryptionKey)
+	decryptionKey1 := generateAESKey(userKeys[0]) // Using the second key
+	decryptedMessage1, err := decryptAES(extractedMessages[0], decryptionKey1)
+	if err != nil {
+		panic(err)
+	}
+	// Decrypt the second message as an example
+	decryptionKey2 := generateAESKey(userKeys[1]) // Using the second key
+	decryptedMessage2, err := decryptAES(extractedMessages[1], decryptionKey2)
 	if err != nil {
 		panic(err)
 	}
 
-	println("Decrypted text with key 2:", decryptedMessage)
+	println("Decrypted text with key 1:", decryptedMessage1)
+	println("Decrypted text with key 2:", decryptedMessage2)
 }
 
 // generateAESKey creates a 32-byte AES key from any given string using SHA-256 hashing.
@@ -94,42 +103,56 @@ func decryptAES(ciphertext []byte, key []byte) (string, error) {
 func loadImageFromFile(filePath string) (image.Image, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error opening file: %v", err)
 	}
 	defer file.Close()
 
-	return png.Decode(file)
+	// Read file bytes directly for debugging
+	data, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("error reading file bytes: %v", err)
+	}
+
+	// Decode the image from the byte slice
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("error decoding PNG: %v", err)
+	}
+	return img, nil
 }
 
 // embedMessagesInImage embeds multiple encrypted texts into an image and saves the result.
 func embedMessagesInImage(img image.Image, messages [][]byte, outputPath string) error {
 	bounds := img.Bounds()
 	nrgbaImage := image.NewNRGBA(bounds)
-	writeBuffer := new(bytes.Buffer)
 
-	// Combine messages with a delimiter or fixed size blocks if messages are guaranteed to be the same length
-	for _, msg := range messages {
-		if _, err := writeBuffer.Write(msg); err != nil {
-			return err
-		}
-		// Write a delimiter if needed
-		if _, err := writeBuffer.Write([]byte("|")); err != nil {
-			return err
+	// Copying the original image to the new image format
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			nrgbaImage.Set(x, y, img.At(x, y))
 		}
 	}
 
-	if err := steganography.Encode(writeBuffer, nrgbaImage, writeBuffer.Bytes()); err != nil {
-		return err
+	writeBuffer := new(bytes.Buffer)
+	combinedMessage := bytes.Join(messages, []byte("|")) // Combine messages with delimiter
+
+	// Encoding the combined message into the nrgbaImage
+	if err := steganography.Encode(writeBuffer, nrgbaImage, combinedMessage); err != nil {
+		return fmt.Errorf("error encoding message into image: %v", err)
 	}
 
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating output file: %v", err)
 	}
 	defer outputFile.Close()
 
-	_, err = writeBuffer.WriteTo(outputFile)
-	return err
+	// Writing the buffer content to the output file as PNG
+	if _, err = outputFile.Write(writeBuffer.Bytes()); err != nil {
+		return fmt.Errorf("error writing to output file: %v", err)
+	}
+
+	return nil
 }
 
 // extractMessagesFromImage retrieves multiple encrypted texts from an image file based on the count of keys/messages.
