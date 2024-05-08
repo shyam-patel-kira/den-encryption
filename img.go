@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
@@ -99,8 +100,20 @@ func loadImageFromFile(filePath string) (image.Image, error) {
 
 // embedMessageInImage embeds encrypted text into an image and saves the result.
 func embedMessageInImage(img image.Image, message []byte, outputPath string) error {
-	outputImage := image.NewRGBA(img.Bounds())
-	steganography.Encode(outputImage, img, message)
+	// Convert the input image to an *image.NRGBA which is suitable for the steganography.Encode function
+	bounds := img.Bounds()
+	nrgbaImage := image.NewNRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			nrgbaImage.Set(x, y, img.At(x, y))
+		}
+	}
+
+	writeBuffer := new(bytes.Buffer)
+	// Encode the message into the image
+	if err := steganography.Encode(writeBuffer, nrgbaImage, message); err != nil {
+		return err
+	}
 
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
@@ -108,16 +121,28 @@ func embedMessageInImage(img image.Image, message []byte, outputPath string) err
 	}
 	defer outputFile.Close()
 
-	return png.Encode(outputFile, outputImage)
+	// Write the buffer content to the output file
+	_, err = writeBuffer.WriteTo(outputFile)
+	return err
 }
 
 // extractMessageFromImage retrieves encrypted text from an image file.
 func extractMessageFromImage(filePath string) ([]byte, error) {
-	img, err := loadImageFromFile(filePath)
+	imgFile, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer imgFile.Close()
+
+	img, err := png.Decode(imgFile)
 	if err != nil {
 		return nil, err
 	}
 
-	messageSize := steganography.GetMessageSizeFromImage(img)
-	return steganography.Decode(messageSize, img), nil
+	// Determine the size of the hidden message
+	sizeOfMessage := steganography.GetMessageSizeFromImage(img)
+
+	// Decode the message from the image
+	message := steganography.Decode(sizeOfMessage, img)
+	return message, nil
 }
