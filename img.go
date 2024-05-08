@@ -13,44 +13,47 @@ import (
 )
 
 func main() {
-	// Define the secret message and user-provided encryption key
-	secretMessage := "my secret message"
-	userKey := "mySecret"
+	// Define secret messages and user-provided encryption keys
+	secretMessages := []string{"my secret message 1", "another secret message"}
+	userKeys := []string{"mySecret1", "mySecret2"}
 
-	// Convert the user-provided key to a 32-byte key using SHA-256
-	encryptionKey := generateAESKey(userKey)
-
-	// Encrypt the message
-	encryptedMessage, err := encryptAES(secretMessage, encryptionKey)
-	if err != nil {
-		panic(err)
+	// Convert user-provided keys to 32-byte keys using SHA-256 and encrypt messages
+	encryptedMessages := [][]byte{}
+	for i, key := range userKeys {
+		encryptionKey := generateAESKey(key)
+		encryptedMessage, err := encryptAES(secretMessages[i], encryptionKey)
+		if err != nil {
+			panic(err)
+		}
+		encryptedMessages = append(encryptedMessages, encryptedMessage)
 	}
 
-	// Load an image to hide the encrypted message
+	// Load an image to hide the encrypted messages
 	sourceImage, err := loadImageFromFile("./lena.png")
 	if err != nil {
 		panic(err)
 	}
 
-	// Embed the encrypted message into the image
-	err = embedMessageInImage(sourceImage, encryptedMessage, "output.png")
+	// Embed all encrypted messages into the image
+	err = embedMessagesInImage(sourceImage, encryptedMessages, "output.png")
 	if err != nil {
 		panic(err)
 	}
 
-	// Extract the encrypted message from the image
-	extractedMessage, err := extractMessageFromImage("output.png")
+	// Extract and decrypt messages using the second key for demonstration
+	extractedMessages, err := extractMessagesFromImage("output.png", len(userKeys))
 	if err != nil {
 		panic(err)
 	}
 
-	// Decrypt the extracted message
-	decryptedMessage, err := decryptAES(extractedMessage, encryptionKey)
+	// Decrypt the second message as an example
+	decryptionKey := generateAESKey(userKeys[1]) // Using the second key
+	decryptedMessage, err := decryptAES(extractedMessages[1], decryptionKey)
 	if err != nil {
 		panic(err)
 	}
 
-	println("Decrypted text:", decryptedMessage)
+	println("Decrypted text with key 2:", decryptedMessage)
 }
 
 // generateAESKey creates a 32-byte AES key from any given string using SHA-256 hashing.
@@ -98,20 +101,24 @@ func loadImageFromFile(filePath string) (image.Image, error) {
 	return png.Decode(file)
 }
 
-// embedMessageInImage embeds encrypted text into an image and saves the result.
-func embedMessageInImage(img image.Image, message []byte, outputPath string) error {
-	// Convert the input image to an *image.NRGBA which is suitable for the steganography.Encode function
+// embedMessagesInImage embeds multiple encrypted texts into an image and saves the result.
+func embedMessagesInImage(img image.Image, messages [][]byte, outputPath string) error {
 	bounds := img.Bounds()
 	nrgbaImage := image.NewNRGBA(bounds)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			nrgbaImage.Set(x, y, img.At(x, y))
+	writeBuffer := new(bytes.Buffer)
+
+	// Combine messages with a delimiter or fixed size blocks if messages are guaranteed to be the same length
+	for _, msg := range messages {
+		if _, err := writeBuffer.Write(msg); err != nil {
+			return err
+		}
+		// Write a delimiter if needed
+		if _, err := writeBuffer.Write([]byte("|")); err != nil {
+			return err
 		}
 	}
 
-	writeBuffer := new(bytes.Buffer)
-	// Encode the message into the image
-	if err := steganography.Encode(writeBuffer, nrgbaImage, message); err != nil {
+	if err := steganography.Encode(writeBuffer, nrgbaImage, writeBuffer.Bytes()); err != nil {
 		return err
 	}
 
@@ -121,13 +128,12 @@ func embedMessageInImage(img image.Image, message []byte, outputPath string) err
 	}
 	defer outputFile.Close()
 
-	// Write the buffer content to the output file
 	_, err = writeBuffer.WriteTo(outputFile)
 	return err
 }
 
-// extractMessageFromImage retrieves encrypted text from an image file.
-func extractMessageFromImage(filePath string) ([]byte, error) {
+// extractMessagesFromImage retrieves multiple encrypted texts from an image file based on the count of keys/messages.
+func extractMessagesFromImage(filePath string, count int) ([][]byte, error) {
 	imgFile, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -139,10 +145,9 @@ func extractMessageFromImage(filePath string) ([]byte, error) {
 		return nil, err
 	}
 
-	// Determine the size of the hidden message
 	sizeOfMessage := steganography.GetMessageSizeFromImage(img)
+	encodedData := steganography.Decode(sizeOfMessage, img)
 
-	// Decode the message from the image
-	message := steganography.Decode(sizeOfMessage, img)
-	return message, nil
+	// Split messages using the delimiter or fixed size blocks
+	return bytes.SplitN(encodedData, []byte("|"), count), nil
 }
