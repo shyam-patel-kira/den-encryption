@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"image"
 	"image/png"
 	"os"
@@ -11,9 +12,12 @@ import (
 )
 
 func main() {
-	// Define the secret message and encryption key
+	// Define the secret message and user-provided encryption key
 	secretMessage := "Your secret message goes here"
-	encryptionKey := []byte("your32-byteencryptionkey!!!!") // AES-256 requires a 32-byte key
+	userKey := "your-password"
+
+	// Convert the user-provided key to a 32-byte key using SHA-256
+	encryptionKey := generateAESKey(userKey)
 
 	// Encrypt the message
 	encryptedMessage, err := encryptAES(secretMessage, encryptionKey)
@@ -46,6 +50,12 @@ func main() {
 	}
 
 	println("Decrypted text:", decryptedMessage)
+}
+
+// generateAESKey creates a 32-byte AES key from any given string using SHA-256 hashing.
+func generateAESKey(inputKey string) []byte {
+	hash := sha256.Sum256([]byte(inputKey))
+	return hash[:]
 }
 
 // encryptAES encrypts plaintext using AES encryption with the provided key.
