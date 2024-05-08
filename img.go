@@ -13,8 +13,8 @@ import (
 
 func main() {
 	// Define the secret message and user-provided encryption key
-	secretMessage := "Your secret message goes here"
-	userKey := "your-password"
+	secretMessage := "my secret message"
+	userKey := "mySecret"
 
 	// Convert the user-provided key to a 32-byte key using SHA-256
 	encryptionKey := generateAESKey(userKey)
@@ -26,7 +26,7 @@ func main() {
 	}
 
 	// Load an image to hide the encrypted message
-	sourceImage, err := loadImageFromFile("path/to/your/image.png")
+	sourceImage, err := loadImageFromFile("./lena.png")
 	if err != nil {
 		panic(err)
 	}
