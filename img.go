@@ -5,101 +5,80 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"image/png"
-	"io/ioutil"
 	"os"
 
 	"github.com/auyer/steganography"
 )
 
 func main() {
-	// Define the secret message and user-provided encryption keys
-	secretMessages := []string{"decoyee secret message", "my actual Secret message"}
-	userKeys := []string{"mySecret1", "mySecret2"}
+	secretMessages := []string{"decoyee secret2", "actual secret 2"}
+	userKeys := []string{"mySecret123", "mySecret234"}
 
-	// Convert the user-provided keys to 32-byte keys using SHA-256
-	encryptedMessages := [][]byte{}
+	encryptedMessages := make([][]byte, len(secretMessages))
 	for i, key := range userKeys {
 		encryptionKey := generateAESKey(key)
 		encryptedMessage, err := encryptAES(secretMessages[i], encryptionKey)
 		if err != nil {
 			panic(err)
 		}
-		encryptedMessages = append(encryptedMessages, encryptedMessage)
+		encryptedMessages[i] = encryptedMessage
 	}
 
-	// Load an image to hide the encrypted messages
-	sourceImage, err := loadImageFromFile("/Users/shyampatel/Networking/random/den-cryption/lena.png")
+	sourceImage, err := loadImageFromFile("lena.png")
 	if err != nil {
 		panic(fmt.Sprintf("Failed to load image: %v", err))
 	}
 
-	// Embed all encrypted messages into the image
-	err = embedMessagesInImage(sourceImage, encryptedMessages, "output.png")
+	if err := embedMessagesInImage(sourceImage, encryptedMessages, "output.png"); err != nil {
+		panic(err)
+	}
+
+	extractedMessages, err := extractMessagesFromImage("output.png", len(userKeys), encryptedMessages)
 	if err != nil {
 		panic(err)
 	}
 
-	// Extract and decrypt messages using the second key for demonstration
-	extractedMessages, err := extractMessagesFromImage("output.png", len(userKeys))
-	if err != nil {
-		panic(err)
+	for idx, extractedMessage := range extractedMessages {
+		decryptionKey := generateAESKey(userKeys[idx])
+		decryptedMessage, err := decryptAES(extractedMessage, decryptionKey)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("Decrypted text with key %d: %s\n", idx+1, decryptedMessage)
 	}
-
-	// Decrypt the second message as an example
-	decryptionKey1 := generateAESKey(userKeys[0]) // Using the second key
-	decryptedMessage1, err := decryptAES(extractedMessages[0], decryptionKey1)
-	if err != nil {
-		panic(err)
-	}
-	// Decrypt the second message as an example
-	decryptionKey2 := generateAESKey(userKeys[1]) // Using the second key
-	decryptedMessage2, err := decryptAES(extractedMessages[1], decryptionKey2)
-	if err != nil {
-		panic(err)
-	}
-
-	println("Decrypted text with key 1:", decryptedMessage1)
-	println("Decrypted text with key 2:", decryptedMessage2)
 }
 
-// generateAESKey creates a 32-byte AES key from any given string using SHA-256 hashing.
 func generateAESKey(inputKey string) []byte {
 	hash := sha256.Sum256([]byte(inputKey))
 	return hash[:]
 }
 
-// encryptAES encrypts plaintext using AES encryption with the provided key.
 func encryptAES(plaintext string, key []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-
 	cfb := cipher.NewCFBEncrypter(block, key[:aes.BlockSize])
 	encryptedText := make([]byte, len(plaintext))
 	cfb.XORKeyStream(encryptedText, []byte(plaintext))
-
 	return encryptedText, nil
 }
 
-// decryptAES decrypts ciphertext using AES decryption with the provided key.
 func decryptAES(ciphertext []byte, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", err
 	}
-
 	cfb := cipher.NewCFBDecrypter(block, key[:aes.BlockSize])
 	decryptedText := make([]byte, len(ciphertext))
 	cfb.XORKeyStream(decryptedText, ciphertext)
-
 	return string(decryptedText), nil
 }
 
-// loadImageFromFile loads an image from the specified file path.
 func loadImageFromFile(filePath string) (image.Image, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -107,38 +86,32 @@ func loadImageFromFile(filePath string) (image.Image, error) {
 	}
 	defer file.Close()
 
-	// Read file bytes directly for debugging
-	data, err := ioutil.ReadAll(file)
-	if err != nil {
-		return nil, fmt.Errorf("error reading file bytes: %v", err)
-	}
-
-	// Decode the image from the byte slice
-	img, err := png.Decode(bytes.NewReader(data))
+	img, err := png.Decode(file)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding PNG: %v", err)
 	}
 	return img, nil
 }
 
-// embedMessagesInImage embeds multiple encrypted texts into an image and saves the result.
 func embedMessagesInImage(img image.Image, messages [][]byte, outputPath string) error {
 	bounds := img.Bounds()
 	nrgbaImage := image.NewNRGBA(bounds)
-
-	// Copying the original image to the new image format
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			nrgbaImage.Set(x, y, img.At(x, y))
 		}
 	}
 
-	writeBuffer := new(bytes.Buffer)
-	combinedMessage := bytes.Join(messages, []byte("|")) // Combine messages with delimiter
+	buf := new(bytes.Buffer)
+	for _, msg := range messages {
+		binary.Write(buf, binary.LittleEndian, int32(len(msg))) // Write message length
+		buf.Write(msg)                                          // Write message content
+	}
 
-	// Encoding the combined message into the nrgbaImage
-	if err := steganography.Encode(writeBuffer, nrgbaImage, combinedMessage); err != nil {
-		return fmt.Errorf("error encoding message into image: %v", err)
+	// Encode using steganography library (v1.0.2)
+	outputBuffer := new(bytes.Buffer)
+	if err := steganography.Encode(outputBuffer, nrgbaImage, buf.Bytes()); err != nil {
+		return fmt.Errorf("error encoding messages into image: %v", err)
 	}
 
 	outputFile, err := os.Create(outputPath)
@@ -147,16 +120,17 @@ func embedMessagesInImage(img image.Image, messages [][]byte, outputPath string)
 	}
 	defer outputFile.Close()
 
-	// Writing the buffer content to the output file as PNG
-	if _, err = outputFile.Write(writeBuffer.Bytes()); err != nil {
+	// Write the modified image data from outputBuffer
+	_, err = outputFile.Write(outputBuffer.Bytes())
+	if err != nil {
 		return fmt.Errorf("error writing to output file: %v", err)
 	}
 
-	return nil
+	return nil // No need for png.Encode here, we've already written the encoded data
 }
 
 // extractMessagesFromImage retrieves multiple encrypted texts from an image file based on the count of keys/messages.
-func extractMessagesFromImage(filePath string, count int) ([][]byte, error) {
+func extractMessagesFromImage(filePath string, count int, encryptedMessages [][]byte) ([][]byte, error) {
 	imgFile, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -168,9 +142,38 @@ func extractMessagesFromImage(filePath string, count int) ([][]byte, error) {
 		return nil, err
 	}
 
-	sizeOfMessage := steganography.GetMessageSizeFromImage(img)
-	encodedData := steganography.Decode(sizeOfMessage, img)
+	// Calculate the total size of encoded data
+	totalSize := calculateTotalEncodedSize(encryptedMessages)
 
-	// Split messages using the delimiter or fixed size blocks
-	return bytes.SplitN(encodedData, []byte("|"), count), nil
+	// Decode the embedded data using steganography (v1.0.2)
+	extractedData := steganography.Decode(totalSize, img) // No error returned
+
+	// Extract individual messages based on their encoded lengths
+	messages := make([][]byte, 0, count)
+	dataReader := bytes.NewReader(extractedData)
+	for i := 0; i < count; i++ {
+		var length int32
+		if err := binary.Read(dataReader, binary.LittleEndian, &length); err != nil {
+			return nil, fmt.Errorf("error reading message length: %v", err)
+		}
+		msg := make([]byte, length)
+		if _, err := dataReader.Read(msg); err != nil {
+			return nil, fmt.Errorf("error reading message: %v", err)
+		}
+		messages = append(messages, msg)
+	}
+
+	return messages, nil
+}
+
+// calculateTotalEncodedSize calculates the total size of all messages to be encoded,
+// including the space needed to store their lengths.
+func calculateTotalEncodedSize(messages [][]byte) uint32 {
+	var totalSize uint32 = 0
+	// Each message length itself takes up 4 bytes (int32), plus the length of the message.
+	for _, msg := range messages {
+		totalSize += uint32(4)        // 4 bytes for the length of the message
+		totalSize += uint32(len(msg)) // actual message size
+	}
+	return totalSize
 }

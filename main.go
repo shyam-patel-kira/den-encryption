@@ -75,6 +75,7 @@ func main() {
 	combinedEncryptedData := encryptedReal + "||" + encryptedDecoy
 
 	// Assume decryption attempt
+	fmt.Println("This is the encrypted data : ", combinedEncryptedData)
 	fmt.Println("Enter the password to decrypt the data:")
 	var inputPassword string
 	fmt.Scanln(&inputPassword)
